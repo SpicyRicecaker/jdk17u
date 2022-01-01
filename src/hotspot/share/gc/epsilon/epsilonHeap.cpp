@@ -77,6 +77,8 @@
 #include "utilities/stack.inline.hpp"
 // a debug class to measure vm performance
 #include "services/management.hpp"
+// provides the derived pointer clear
+#include "compiler/oopMap.hpp"
 
 jint EpsilonHeap::initialize() {
   size_t align = HeapAlignment;
@@ -710,6 +712,8 @@ void EpsilonHeap::entry_collect(GCCause::Cause cause) {
     // before the cycle: no memory is taken if GC is not happening, the memory
     // is "cleared" on first touch, and untouched parts of bitmap are mapped
     // to zero page, boosting performance on sparse heaps.
+    // remember, committing memory is like recieving a range of virtual addresses that directly map to physical addresses,
+    // and other programs cannot use it anymore
     if (!os::commit_memory((char*)_bitmap_region.start(), _bitmap_region.byte_size(), false)) {
       log_warning(gc)("Could not commit native memory for marking bitmap, GC failed");
       return;
