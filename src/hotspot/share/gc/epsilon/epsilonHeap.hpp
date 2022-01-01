@@ -52,6 +52,8 @@ private:
   // place in memory where bitmap is stored
   MemRegion _bitmap_region;
   // Q: how are we sure that the bitmap is always contiguous if we're adding and removing bits?
+  // A: because in linux, committing memory always returns a contiguous chunk of memory, and we recommit (recreate) the bitmap
+  // on every single garbage collection cycle.
   MarkBitMap _bitmap;
 
 public:
@@ -150,6 +152,11 @@ private:
   void print_heap_info(size_t used) const;
   void print_metaspace_info() const;
 
+  void vmentry_collect(GCCause::Cause cause);
+
+  // adds the roots to the worklist first
+  void do_roots(OopClosure* cl, bool everything);
+  void process_roots(OopClosure* cl)     { do_roots(cl, false); }
 };
 
 #endif // SHARE_GC_EPSILON_EPSILONHEAP_HPP

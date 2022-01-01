@@ -41,12 +41,8 @@
 // these classfiles seem to be something specific to the java implementation
 // it's like they're walking the java classes
 #include "classfile/classLoaderDataGraph.hpp"
-#include "classfile/stringTable.hpp"
-#include "classfile/systemDictionary.hpp"
 // also seems to be specific to java
 #include "code/codeCache.hpp"
-// the set of barriers, which should be empty for epsilon, because we don't have any write barriers if we're not using generational collectors and not doing parallel
-#include "gc/shared/barrierSet.inline.hpp"
 // just a debug file used for profiling
 #include "gc/shared/gcTraceTime.inline.hpp"
 // **IMPORTANT** we use this to keep track of which objects are marked during mark and sweep, by attaching a bit (0 or 1) to each object to determine if they are alive or not
@@ -55,14 +51,12 @@
 #include "gc/shared/strongRootsScope.hpp"
 // the worklist of marked objects we use when we're traversing the list
 #include "gc/shared/preservedMarks.inline.hpp"
-// scans for root nodes and weak references
-#include "gc/shared/weakProcessor.hpp"
+//
+#include "gc/shared/oopStorageSet.inline.hpp"
 // **IMPORTANT** 1.2.2 object walkers, used for traversing nested objects in java, which we need for mark -sweep and basically any tracing garbage collection algorithm
 #include "memory/iterator.inline.hpp"
 // compressed oops, responsible for compressing java objects
 #include "oops/compressedOops.inline.hpp"
-// **IMPORTANT** marks object `word` for deletion or preservation during GC
-#include "oops/markWord.inline.hpp"
 // **IMPORTANT** locks a thread so that GC can do stuff with the marked objects
 #include "runtime/biasedLocking.hpp"
 // debug information for objects at runtime
@@ -73,12 +67,26 @@
 #include "runtime/vmOperations.hpp"
 // primary thread for vm, that's responsible for the infinite garbage collection loop and other methods
 #include "runtime/vmThread.hpp"
-// **IMPORTANT** the stack, responsible for holding segments and root objects that the gc needs access to in order to traverse the graph
-#include "utilities/stack.inline.hpp"
 // a debug class to measure vm performance
 #include "services/management.hpp"
+//
+#include "services/memTracker.hpp"
+// **IMPORTANT** the stack, responsible for holding segments and root objects that the gc needs access to in order to traverse the graph
+// #include "utilities/stack.inline.hpp"
+
+// #include "classfile/stringTable.hpp"
+// #include "classfile/systemDictionary.hpp"
+// // the set of barriers, which should be empty for epsilon, because we don't have any write barriers if we're not using generational collectors and not doing parallel
+// #include "gc/shared/barrierSet.inline.hpp"
+// // scans for root nodes and weak references
+// #include "gc/shared/weakProcessor.hpp"
+// // **IMPORTANT** marks object `word` for deletion or preservation during GC
+// #include "oops/markWord.inline.hpp"
+
 // provides the derived pointer clear
 #include "compiler/oopMap.hpp"
+// provides oop_do
+#include "classfile/classLoaderData.hpp"
 
 jint EpsilonHeap::initialize() {
   size_t align = HeapAlignment;
@@ -737,7 +745,10 @@ void EpsilonHeap::entry_collect(GCCause::Cause cause) {
     // Marking stack and the closure that does most of the work. The closure
     // would scan the outgoing references, mark them, and push newly-marked
     // objects to stack for further processing.
+    // this is basically breadth-first traversal with a stack + iteration instead of with recursion
+    // we use iteration since there could be potentially billions of references so we can't recurse that much
     EpsilonMarkStack stack;
+    //
     EpsilonScanOopClosure cl(&stack, &_bitmap);
 
     // Seed the marking with roots.
