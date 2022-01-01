@@ -26,6 +26,8 @@
 #define SHARE_GC_EPSILON_EPSILONHEAP_HPP
 
 #include "gc/shared/collectedHeap.hpp"
+// for marking during gc mark phase
+#include "gc/shared/markBitMap.hpp"
 #include "gc/shared/softRefPolicy.hpp"
 #include "gc/shared/space.hpp"
 #include "gc/epsilon/epsilonMonitoringSupport.hpp"
@@ -47,6 +49,10 @@ private:
   int64_t _decay_time_ns;
   volatile size_t _last_counter_update;
   volatile size_t _last_heap_print;
+  // place in memory where bitmap is stored
+  MemRegion _bitmap_region;
+  // Q: how are we sure that the bitmap is always contiguous if we're adding and removing bits?
+  MarkBitMap _bitmap;
 
 public:
   static EpsilonHeap* heap();

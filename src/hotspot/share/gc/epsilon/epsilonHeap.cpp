@@ -36,6 +36,7 @@
 #include "memory/universe.hpp"
 #include "runtime/atomic.hpp"
 #include "runtime/globals.hpp"
+
 // added includes, we're pulling most of them from the shared gc library, which implements like everything already
 // these classfiles seem to be something specific to the java implementation
 // it's like they're walking the java classes
@@ -48,7 +49,7 @@
 #include "gc/shared/barrierSet.inline.hpp"
 // just a debug file used for profiling
 #include "gc/shared/gcTraceTime.inline.hpp"
-// **IMPORTANT** we use this to keep track of which objects are marked during mark and sweep
+// **IMPORTANT** we use this to keep track of which objects are marked during mark and sweep, by attaching a bit (0 or 1) to each object to determine if they are alive or not
 #include "gc/shared/markBitMap.inline.hpp"
 // seems to be a mandatory part of the openjdk interface for multiple threads, but since we're using 1 thread it doesn't really matter
 #include "gc/shared/strongRootsScope.hpp"
@@ -107,18 +108,21 @@ jint EpsilonHeap::initialize() {
   // Install barrier set
   BarrierSet::set_barrier_set(new EpsilonBarrierSet());
 
-    size_t bitmap_page_size = UseLargePages ? (size_t)os::large_page_size() : (size_t)os::vm_page_size();
+  // commit memory, which means that the bitmap is a reserved portion of memory
+  // the header file mentioned that it shouldn't be allocated on heap but whatever
+   size_t bitmap_page_size = UseLargePages ? (size_t)os::large_page_size() : (size_t)os::vm_page_size();
+  // size of the bitmap? how is this not dynamic? 
    size_t _bitmap_size = MarkBitMap::compute_size(heap_rs.size());
    _bitmap_size = align_up(_bitmap_size, bitmap_page_size);
 
-   // Initialize marking bitmap, but not commit it yet
-  //  if (EpsilonSlidingGC) {
-  //    ReservedSpace bitmap(_bitmap_size, bitmap_page_size);
-  //    MemTracker::record_virtual_memory_type(bitmap.base(), mtGC);
-  //    _bitmap_region = MemRegion((HeapWord *) bitmap.base(), bitmap.size() / HeapWordSize);
-  //    MemRegion heap_region = MemRegion((HeapWord *) heap_rs.base(), heap_rs.size() / HeapWordSize);
-  //    _bitmap.initialize(heap_region, _bitmap_region);
-  //  }
+  //  Initialize marking bitmap, but not commit it yet
+   if (EpsilonSlidingGC) {
+     ReservedSpace bitmap(_bitmap_size, bitmap_page_size);
+     MemTracker::record_virtual_memory_type(bitmap.base(), mtGC);
+     _bitmap_region = MemRegion((HeapWord *) bitmap.base(), bitmap.size() / HeapWordSize);
+     MemRegion heap_region = MemRegion((HeapWord *) heap_rs.base(), heap_rs.size() / HeapWordSize);
+     _bitmap.initialize(heap_region, _bitmap_region);
+   }
 
   // All done, print out the configuration
   EpsilonInitLogger::print();
