@@ -422,6 +422,14 @@ void EpsilonHeap::print_metaspace_info() const {
   }
 }
 
+
+
+
+// EPSILON MARK SWEEP
+
+
+
+
 // VM operation that executes collection cycle under safepoint
 class VM_EpsilonCollect: public VM_Operation {
 private:
@@ -686,9 +694,13 @@ void EpsilonHeap::entry_collect(GCCause::Cause cause) {
   GCTraceTime(Info, gc) time("Lisp2-style Mark-Compact", NULL, cause, true);
 
   // Some statistics, for fun and profit:
+  // number of reachable roots, which are stored on the heap
   size_t stat_reachable_roots = 0;
+  // number of reachable objects on the heap
   size_t stat_reachable_heap = 0;
+  // number of objects that we move in one compact
   size_t stat_moved = 0;
+  // number of objects that are marked and retained, vs. the number of unreachables
   size_t stat_preserved_marks = 0;
 
   {

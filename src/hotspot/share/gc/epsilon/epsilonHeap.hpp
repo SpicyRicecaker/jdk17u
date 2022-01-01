@@ -142,6 +142,10 @@ public:
   virtual void print_tracing_info() const;
   virtual bool print_location(outputStream* st, void* addr) const;
 
+  // the collect function of a mark-compact algorithm,
+  // which includes `mark()` and `compact()` to free up garbage
+  void entry_collect(GCCause::Cause cause);
+
 private:
   void print_heap_info(size_t used) const;
   void print_metaspace_info() const;
