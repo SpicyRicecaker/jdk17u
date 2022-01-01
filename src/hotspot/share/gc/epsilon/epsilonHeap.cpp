@@ -36,6 +36,46 @@
 #include "memory/universe.hpp"
 #include "runtime/atomic.hpp"
 #include "runtime/globals.hpp"
+// added includes, we're pulling most of them from the shared gc library, which implements like everything already
+// these classfiles seem to be something specific to the java implementation
+// it's like they're walking the java classes
+#include "classfile/classLoaderDataGraph.hpp"
+#include "classfile/stringTable.hpp"
+#include "classfile/systemDictionary.hpp"
+// also seems to be specific to java
+#include "code/codeCache.hpp"
+// the set of barriers, which should be empty for epsilon, because we don't have any write barriers if we're not using generational collectors and not doing parallel
+#include "gc/shared/barrierSet.inline.hpp"
+// just a debug file used for profiling
+#include "gc/shared/gcTraceTime.inline.hpp"
+// **IMPORTANT** we use this to keep track of which objects are marked during mark and sweep
+#include "gc/shared/markBitMap.inline.hpp"
+// seems to be a mandatory part of the openjdk interface for multiple threads, but since we're using 1 thread it doesn't really matter
+#include "gc/shared/strongRootsScope.hpp"
+// the worklist of marked objects we use when we're traversing the list
+#include "gc/shared/preservedMarks.inline.hpp"
+// scans for root nodes and weak references
+#include "gc/shared/weakProcessor.hpp"
+// **IMPORTANT** 1.2.2 object walkers, used for traversing nested objects in java, which we need for mark -sweep and basically any tracing garbage collection algorithm
+#include "memory/iterator.inline.hpp"
+// compressed oops, responsible for compressing java objects
+#include "oops/compressedOops.inline.hpp"
+// **IMPORTANT** marks object `word` for deletion or preservation during GC
+#include "oops/markWord.inline.hpp"
+// **IMPORTANT** locks a thread so that GC can do stuff with the marked objects
+#include "runtime/biasedLocking.hpp"
+// debug information for objects at runtime
+#include "runtime/objectMonitor.inline.hpp"
+// class responsible for starting multiple threads in java
+#include "runtime/thread.hpp"
+// "hodgepodge of useful vm functions"
+#include "runtime/vmOperations.hpp"
+// primary thread for vm, that's responsible for the infinite garbage collection loop and other methods
+#include "runtime/vmThread.hpp"
+// **IMPORTANT** the stack, responsible for holding segments and root objects that the gc needs access to in order to traverse the graph
+#include "utilities/stack.inline.hpp"
+// a debug class to measure vm performance
+#include "services/management.hpp"
 
 jint EpsilonHeap::initialize() {
   size_t align = HeapAlignment;
@@ -66,6 +106,19 @@ jint EpsilonHeap::initialize() {
 
   // Install barrier set
   BarrierSet::set_barrier_set(new EpsilonBarrierSet());
+
+    size_t bitmap_page_size = UseLargePages ? (size_t)os::large_page_size() : (size_t)os::vm_page_size();
+   size_t _bitmap_size = MarkBitMap::compute_size(heap_rs.size());
+   _bitmap_size = align_up(_bitmap_size, bitmap_page_size);
+
+   // Initialize marking bitmap, but not commit it yet
+  //  if (EpsilonSlidingGC) {
+  //    ReservedSpace bitmap(_bitmap_size, bitmap_page_size);
+  //    MemTracker::record_virtual_memory_type(bitmap.base(), mtGC);
+  //    _bitmap_region = MemRegion((HeapWord *) bitmap.base(), bitmap.size() / HeapWordSize);
+  //    MemRegion heap_region = MemRegion((HeapWord *) heap_rs.base(), heap_rs.size() / HeapWordSize);
+  //    _bitmap.initialize(heap_region, _bitmap_region);
+  //  }
 
   // All done, print out the configuration
   EpsilonInitLogger::print();
