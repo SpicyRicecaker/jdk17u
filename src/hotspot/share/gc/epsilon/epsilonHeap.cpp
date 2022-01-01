@@ -111,16 +111,21 @@ jint EpsilonHeap::initialize() {
   // commit memory, which means that the bitmap is a reserved portion of memory
   // the header file mentioned that it shouldn't be allocated on heap but whatever
    size_t bitmap_page_size = UseLargePages ? (size_t)os::large_page_size() : (size_t)os::vm_page_size();
-  // size of the bitmap? how is this not dynamic? 
+  // size of the bitmap? how is this not dynamic?
    size_t _bitmap_size = MarkBitMap::compute_size(heap_rs.size());
    _bitmap_size = align_up(_bitmap_size, bitmap_page_size);
 
   //  Initialize marking bitmap, but not commit it yet
-   if (EpsilonSlidingGC) {
+   if (EpsilonMarkSweepGC) {
+    //  reserves space the size of the bitmap
      ReservedSpace bitmap(_bitmap_size, bitmap_page_size);
+    //  remember that the first bit represents marked bit
      MemTracker::record_virtual_memory_type(bitmap.base(), mtGC);
+    // the bitmap region should be the beginning word of each heap
      _bitmap_region = MemRegion((HeapWord *) bitmap.base(), bitmap.size() / HeapWordSize);
+    // let the heap region cover the heap word
      MemRegion heap_region = MemRegion((HeapWord *) heap_rs.base(), heap_rs.size() / HeapWordSize);
+    // initialize it
      _bitmap.initialize(heap_region, _bitmap_region);
    }
 
@@ -293,7 +298,8 @@ HeapWord* EpsilonHeap::allocate_new_tlab(size_t min_size,
   }
 
   // All prepared, let's do it!
-  HeapWord* res = allocate_work(size);
+  // Remember how gcs work, allocate memory, and if the heap is filled, we have to run a collect on it
+  HeapWord* res = allocate_or_collect_work(size);
 
   if (res != NULL) {
     // Allocation successful
@@ -320,6 +326,8 @@ HeapWord* EpsilonHeap::mem_allocate(size_t size, bool *gc_overhead_limit_was_exc
   return allocate_work(size);
 }
 
+// `cause` is the reason that we're running gc.
+// usually it's because we're out of memory on the heap, but it can also be due to other reasons, such as debugging
 void EpsilonHeap::collect(GCCause::Cause cause) {
   switch (cause) {
     case GCCause::_metadata_GC_threshold:
@@ -334,7 +342,15 @@ void EpsilonHeap::collect(GCCause::Cause cause) {
       print_metaspace_info();
       break;
     default:
+    if(EpsilonMarkSweepGC) {
+      if (SafepointSynchronize::is_at_safepoint()) {
+        entry_collect(cause);
+      } else {
+        vmentry_collect(cause);
+      }
+    } else {
       log_info(gc)("GC request for \"%s\" is ignored", GCCause::to_string(cause));
+    }
   }
   _monitoring_support->update_counters();
 }
