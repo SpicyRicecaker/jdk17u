@@ -88,8 +88,8 @@
           "at the potential expense of memory waste.")                      \
           range(1, max_intx)                                                \
                                                                             \
-  product(bool, EpsilonMarkSweepGC, false, EXPERIMENTAL,                    \
-          "Gives epsilon a mark-compact GC.")                         \
+  product(bool, EpsilonMarkCompactGC, false, EXPERIMENTAL,                    \
+          "Gives epsilon a mark-compact GC, sliding LISP-2 style.")                         \
                                                                             \
   product(bool, EpsilonUncommit, false, EXPERIMENTAL,                       \
           "Uncommits all unneeded memory after GC.")                        \

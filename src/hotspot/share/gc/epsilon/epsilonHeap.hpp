@@ -97,6 +97,10 @@ public:
 
   // Allocation
   HeapWord* allocate_work(size_t size);
+
+  // Because epsilon doesn't have a garbage collector, we add a function that allocates and calls collect if needed
+  HeapWord* allocate_or_collect_work(size_t size);
+
   virtual HeapWord* mem_allocate(size_t size, bool* gc_overhead_limit_was_exceeded);
   virtual HeapWord* allocate_new_tlab(size_t min_size,
                                       size_t requested_size,
@@ -116,7 +120,7 @@ public:
 
   // Object pinning support: every object is implicitly pinned
   // ...But only if we don't have our experimental gc running
-  virtual bool supports_object_pinning() const           { return !EpsilonMarkSweepGC; }
+  virtual bool supports_object_pinning() const           { return !EpsilonMarkCompactGC; }
   virtual oop pin_object(JavaThread* thread, oop obj)    { return obj; }
   virtual void unpin_object(JavaThread* thread, oop obj) { }
 
@@ -156,7 +160,12 @@ private:
 
   // adds the roots to the worklist first
   void do_roots(OopClosure* cl, bool everything);
+  // TODO
   void process_roots(OopClosure* cl)     { do_roots(cl, false); }
+  // TODO
+  void process_all_roots(OopClosure* cl) { do_roots(cl, true);  }
+  // TODO
+  void walk_bitmap(ObjectClosure* cl);
 };
 
 #endif // SHARE_GC_EPSILON_EPSILONHEAP_HPP

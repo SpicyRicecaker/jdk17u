@@ -126,7 +126,7 @@ jint EpsilonHeap::initialize() {
    _bitmap_size = align_up(_bitmap_size, bitmap_page_size);
 
   //  Initialize marking bitmap, but not commit it yet
-   if (EpsilonMarkSweepGC) {
+   if (EpsilonMarkCompactGC) {
     //  reserves space the size of the bitmap
      ReservedSpace bitmap(_bitmap_size, bitmap_page_size);
     //  remember that the first bit represents marked bit
@@ -352,7 +352,7 @@ void EpsilonHeap::collect(GCCause::Cause cause) {
       print_metaspace_info();
       break;
     default:
-    if(EpsilonMarkSweepGC) {
+    if(EpsilonMarkCompactGC) {
       if (SafepointSynchronize::is_at_safepoint()) {
         entry_collect(cause);
       } else {
@@ -436,9 +436,21 @@ void EpsilonHeap::print_metaspace_info() const {
 
 
 // EPSILON MARK SWEEP
+// START OF MODIFIED CODE
+// CODE FROM Shiplev @ https://shipilev.net/jvm/diy-gc/, I modified it to add comments and make it
+// compatible with the latest version
 
-
-
+// ------------------ EXPERIMENTAL MARK-COMPACT -------------------------------
+//
+// This implements a trivial Lisp2-style sliding collector:
+//     https://en.wikipedia.org/wiki/Mark-compact_algorithm#LISP2_algorithm
+//
+// The goal for this implementation is to be as simple as possible, ignoring
+// non-trivial performance optimizations. This collector does not implement
+// reference processing: no soft/weak/phantom/finalizeable references are ever
+// cleared. It also does not implement class unloading and other runtime
+// cleanups.
+//
 
 // VM operation that executes collection cycle under safepoint
 class VM_EpsilonCollect: public VM_Operation {
@@ -492,7 +504,7 @@ void EpsilonHeap::vmentry_collect(GCCause::Cause cause) {
 
 HeapWord* EpsilonHeap::allocate_or_collect_work(size_t size) {
   HeapWord* res = allocate_work(size);
-  if (res == NULL && EpsilonSlidingGC) {
+  if (res == NULL && EpsilonMarkCompactGC) {
     vmentry_collect(GCCause::_allocation_failure);
     res = allocate_work(size);
   }
@@ -509,27 +521,30 @@ void EpsilonHeap::do_roots(OopClosure* cl, bool everything) {
   CLDToOopClosure clds(cl, ClassLoaderData::_claim_none);
   MarkingCodeBlobClosure blobs(cl, CodeBlobToOopClosure::FixRelocations);
 
-  // Walk all these different parts of runtime roots. Some roots require
-  // holding the lock when walking them.
+  // Strong roots: always reachable roots
+
+  // General strong roots that are registered in OopStorages
+  for (OopStorageSet::Iterator it = OopStorageSet::strong_iterator(); !it.is_end(); ++it) {
+    (*it)->oops_do(cl);
+  }
+
+  // Subsystems that still have their own root handling
+  ClassLoaderDataGraph::cld_do(&clds);
+  Threads::possibly_parallel_oops_do(false, cl, &blobs);
+
   {
     MutexLocker lock(CodeCache_lock, Mutex::_no_safepoint_check_flag);
     CodeCache::blobs_do(&blobs);
   }
 
-  ClassLoaderDataGraph::cld_do(&clds);
-  Universe::oops_do(cl);
-  Management::oops_do(cl);
-  JvmtiExport::oops_do(cl);
-  JNIHandles::oops_do(cl);
-  WeakProcessor::oops_do(cl);
-  ObjectSynchronizer::oops_do(cl);
-  SystemDictionary::oops_do(cl);
-  Threads::possibly_parallel_oops_do(false, cl, &blobs);
-
-  // This is implicitly handled by other roots, and we only want to
-  // touch these during verification.
-  if (everything) {
-    StringTable::oops_do(cl);
+  // Weak roots: in an advanced GC these roots would be skipped during
+  // the initial scan, and walked again after the marking is complete.
+  // Then, we could discover which roots are not actually pointing
+  // to surviving Java objects, and either clean the roots, or mark them.
+  // Current simple implementation does not handle weak roots specially,
+  // and therefore, we mark through them as if they are strong roots.
+  for (OopStorageSet::Iterator it = OopStorageSet::weak_iterator(); !it.is_end(); ++it) {
+    (*it)->oops_do(cl);
   }
 }
 
@@ -567,7 +582,7 @@ private:
       // mark and push it on mark stack for further traversal. Non-atomic
       // check and set would do, as this closure is called by single thread.
       if (!_bitmap->is_marked(obj)) {
-        _bitmap->mark((HeapWord*)obj);
+        _bitmap->mark(obj);
         _stack->push(obj);
       }
     }
@@ -595,7 +610,7 @@ public:
     // If object stays at the same location (which is true for objects in
     // dense prefix, that we would normally get), do not bother recording the
     // move, letting downstream code ignore it.
-    if ((HeapWord*)obj != _compact_point) {
+    if (obj != oop(_compact_point)) {
       markWord mark = obj->mark_raw();
       if (mark.must_be_preserved(obj->klass())) {
         _preserved_marks->push(obj, mark);
@@ -658,7 +673,7 @@ public:
     if (obj->is_forwarded()) {
       oop fwd = obj->forwardee();
       assert(fwd != NULL, "just checking");
-      Copy::aligned_conjoint_words((HeapWord*)obj, (HeapWord*)fwd, obj->size());
+      Copy::aligned_conjoint_words(cast_from_oop<HeapWord*>(obj), cast_from_oop<HeapWord*>(fwd), obj->size());
       fwd->init_mark_raw();
       _moved++;
     }
@@ -681,7 +696,7 @@ private:
     if (!CompressedOops::is_null(o)) {
       oop obj = CompressedOops::decode_not_null(o);
       if (!_bitmap->is_marked(obj)) {
-        _bitmap->mark((HeapWord*)obj);
+        _bitmap->mark(obj);
 
         guarantee(_heap->is_in(obj),        "Is in heap: "   PTR_FORMAT, p2i(obj));
         guarantee(oopDesc::is_oop(obj),     "Is an object: " PTR_FORMAT, p2i(obj));
@@ -748,7 +763,7 @@ void EpsilonHeap::entry_collect(GCCause::Cause cause) {
     // this is basically breadth-first traversal with a stack + iteration instead of with recursion
     // we use iteration since there could be potentially billions of references so we can't recurse that much
     EpsilonMarkStack stack;
-    //
+    // TODO
     EpsilonScanOopClosure cl(&stack, &_bitmap);
 
     // Seed the marking with roots.

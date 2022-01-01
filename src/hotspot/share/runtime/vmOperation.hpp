@@ -109,7 +109,9 @@
   template(PrintMetadata)                         \
   template(GTestExecuteAtSafepoint)               \
   template(JFROldObject)                          \
-  template(JvmtiPostObjectFree)
+  template(JvmtiPostObjectFree)                   \
+  template(EpsilonCollect)
+  // ^ grants a type to epsilon collect
 
 class Thread;
 class outputStream;
