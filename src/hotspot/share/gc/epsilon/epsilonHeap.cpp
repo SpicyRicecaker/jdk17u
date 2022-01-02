@@ -474,6 +474,9 @@ public:
     // last complete GC. Waiting for 1% of heap allocated before starting next
     // GC seems to resolve most races.
     // obtain the lock for the heap
+    //
+    // Straight up locking the heap is stop-the-world, meaning we pause execution of java code
+    // until we are done with GC.
     Heap_lock->lock();
     // calculate the amount of memory that is taken up
     size_t used = _heap->used();
@@ -509,8 +512,11 @@ void EpsilonHeap::vmentry_collect(GCCause::Cause cause) {
 
 HeapWord* EpsilonHeap::allocate_or_collect_work(size_t size) {
   HeapWord* res = allocate_work(size);
+  // if we have a gc, and allocation has failed (since the heap is full)
   if (res == NULL && EpsilonMarkCompactGC) {
+    // then collect some garbage!
     vmentry_collect(GCCause::_allocation_failure);
+    // now try allocating again, but this time fail for real if there is no space left
     res = allocate_work(size);
   }
   return res;
