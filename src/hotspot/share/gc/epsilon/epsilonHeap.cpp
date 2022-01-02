@@ -71,6 +71,8 @@
 #include "services/management.hpp"
 //
 #include "services/memTracker.hpp"
+// a simple stack data structure
+#include "utilities/stack.inline.hpp"
 // **IMPORTANT** the stack, responsible for holding segments and root objects that the gc needs access to in order to traverse the graph
 // #include "utilities/stack.inline.hpp"
 
@@ -85,8 +87,6 @@
 
 // provides the derived pointer clear
 #include "compiler/oopMap.hpp"
-// provides oop_do
-#include "classfile/classLoaderData.hpp"
 
 jint EpsilonHeap::initialize() {
   size_t align = HeapAlignment;
@@ -473,10 +473,15 @@ public:
     // need to handle allocation failure that comes without allocations since
     // last complete GC. Waiting for 1% of heap allocated before starting next
     // GC seems to resolve most races.
+    // obtain the lock for the heap
     Heap_lock->lock();
+    // calculate the amount of memory that is taken up
     size_t used = _heap->used();
+    // calcualte the amount of memory total
     size_t capacity = _heap->capacity();
+    // if we've used more, then record that amount as allocated
     size_t allocated = used > _last_used ? used - _last_used : 0;
+    // if there was an allocation failure, or if we've used at least 1% more of heap we can gc
     if (_cause != GCCause::_allocation_failure || allocated > capacity / 100) {
       return true;
     } else {
@@ -524,9 +529,13 @@ void EpsilonHeap::do_roots(OopClosure* cl, bool everything) {
   // Strong roots: always reachable roots
 
   // General strong roots that are registered in OopStorages
-  for (OopStorageSet::Iterator it = OopStorageSet::strong_iterator(); !it.is_end(); ++it) {
-    (*it)->oops_do(cl);
-  }
+  // for (OopStorageSet::<Iterator> it = OopStorageSet::strong_iterator(); !it.is_end(); ++it) {
+  //   (*it)->oops_do(cl);
+  // }
+  // checkout `roots_do` functions for shenandoah. This is the new api for iterating over strno groots
+  for (auto id : EnumRange<OopStorageSet::StrongId>()) {
+     OopStorageSet::storage(id)->oops_do(cl);
+   }
 
   // Subsystems that still have their own root handling
   ClassLoaderDataGraph::cld_do(&clds);
@@ -543,9 +552,12 @@ void EpsilonHeap::do_roots(OopClosure* cl, bool everything) {
   // to surviving Java objects, and either clean the roots, or mark them.
   // Current simple implementation does not handle weak roots specially,
   // and therefore, we mark through them as if they are strong roots.
-  for (OopStorageSet::Iterator it = OopStorageSet::weak_iterator(); !it.is_end(); ++it) {
-    (*it)->oops_do(cl);
-  }
+  // for (OopStorageSet::Iterator it = OopStorageSet::weak_iterator(); !it.is_end(); ++it) {
+  //   (*it)->oops_do(cl);
+  // }
+  for (auto id : EnumRange<OopStorageSet::WeakId>()) {
+     OopStorageSet::storage(id)->oops_do(cl);
+   }
 }
 
 // Walk the marking bitmap and call object closure on every marked object.
@@ -555,7 +567,8 @@ void EpsilonHeap::walk_bitmap(ObjectClosure* cl) {
    HeapWord* limit = _space->top();
    HeapWord* addr = _bitmap.get_next_marked_addr(_space->bottom(), limit);
    while (addr < limit) {
-     oop obj = oop(addr);
+    //  shenandoah casts the addr to oop, so we'll do that too
+     oop obj = cast_to_oop(addr);
      assert(_bitmap.is_marked(obj), "sanity");
      cl->do_object(obj);
      addr += 1;
@@ -610,12 +623,15 @@ public:
     // If object stays at the same location (which is true for objects in
     // dense prefix, that we would normally get), do not bother recording the
     // move, letting downstream code ignore it.
-    if (obj != oop(_compact_point)) {
-      markWord mark = obj->mark_raw();
-      if (mark.must_be_preserved(obj->klass())) {
+    if (obj != cast_to_oop(_compact_point)) {
+      // change from mark_raw to mark
+      markWord mark = obj->mark();
+      // change from mark.must_be_preserved(obj->klass()) to obj->mark_must_be_preserved()
+      // checkout `g1FullGCCompactionPoint.cpp` for more context
+      if (obj->mark_must_be_preserved()) {
         _preserved_marks->push(obj, mark);
       }
-      obj->forward_to(oop(_compact_point));
+      obj->forward_to(cast_to_oop(_compact_point));
     }
     _compact_point += obj->size();
   }
@@ -674,7 +690,9 @@ public:
       oop fwd = obj->forwardee();
       assert(fwd != NULL, "just checking");
       Copy::aligned_conjoint_words(cast_from_oop<HeapWord*>(obj), cast_from_oop<HeapWord*>(fwd), obj->size());
-      fwd->init_mark_raw();
+      // change from init_mark_raw to init_mark
+      // checkout g1fullgccompactionpoint.cpp for more detail
+      fwd->init_mark();
       _moved++;
     }
   }
