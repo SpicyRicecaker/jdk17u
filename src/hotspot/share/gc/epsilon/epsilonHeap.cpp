@@ -532,7 +532,7 @@ void EpsilonHeap::do_roots(OopClosure* cl, bool everything) {
   // for (OopStorageSet::<Iterator> it = OopStorageSet::strong_iterator(); !it.is_end(); ++it) {
   //   (*it)->oops_do(cl);
   // }
-  // checkout `roots_do` functions for shenandoah. This is the new api for iterating over strno groots
+  // checkout `roots_do` functions for shenandoah. This is the new api for iterating over strong roots
   for (auto id : EnumRange<OopStorageSet::StrongId>()) {
      OopStorageSet::storage(id)->oops_do(cl);
    }
@@ -584,6 +584,7 @@ private:
   MarkBitMap* const _bitmap;
 
   template <class T>
+  // for each reference that we encounter
   void do_oop_work(T* p) {
     // p is the pointer to memory location where oop is, load the value
     // from it, unpack the compressed reference, if needed:
@@ -595,7 +596,9 @@ private:
       // mark and push it on mark stack for further traversal. Non-atomic
       // check and set would do, as this closure is called by single thread.
       if (!_bitmap->is_marked(obj)) {
+        // TL;DR we mark the object on the bitmap if it isn't marked already
         _bitmap->mark(obj);
+        // then we push it to the stack for further processing
         _stack->push(obj);
       }
     }
@@ -781,17 +784,22 @@ void EpsilonHeap::entry_collect(GCCause::Cause cause) {
     // this is basically breadth-first traversal with a stack + iteration instead of with recursion
     // we use iteration since there could be potentially billions of references so we can't recurse that much
     EpsilonMarkStack stack;
-    // TODO
+    // this is a closure that marks the reference and pushes it to the stack. think of it like a function that you can pass around as a variable, like javascript
     EpsilonScanOopClosure cl(&stack, &_bitmap);
 
     // Seed the marking with roots.
+    // in other words, pushes initial reachable roots onto the stack
     process_roots(&cl);
     stat_reachable_roots = stack.size();
 
     // Scan the rest of the heap until we run out of objects. Termination is
     // guaranteed, because all reachable objects would be marked eventually.
     while (!stack.is_empty()) {
+      // we grab the top level object (breadth-first search)
       oop obj = stack.pop();
+      // iterate its references, and apply those to the heap.
+      // in other words, `oop_iterate` iterates over the fields of obj, not obj itself dummy
+      // it's a visitor pattern btw, notice how obj calls the closure on itself
       obj->oop_iterate(&cl);
       stat_reachable_heap++;
     }
