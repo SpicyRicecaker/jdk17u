@@ -727,12 +727,21 @@ public:
     // Copy the object to its new location, if needed. This is final step,
     // so we have to re-initialize its new mark word, dropping the forwardee
     // data from it.
+    //
+    // If we moved the object
     if (obj->is_forwarded()) {
+      // Retrieve the fowarding address
       oop fwd = obj->forwardee();
+      // sanity check
       assert(fwd != NULL, "just checking");
+      // a very complicated function that basically just calls `memmove`
+      // to move the object to its forwarding address
       Copy::aligned_conjoint_words(cast_from_oop<HeapWord*>(obj), cast_from_oop<HeapWord*>(fwd), obj->size());
       // change from init_mark_raw to init_mark
       // checkout g1fullgccompactionpoint.cpp for more detail
+      //
+      // Zero out the mark data of the object, effectively removing the fowarding address
+      // and unmarking the object at the same time
       fwd->init_mark();
       _moved++;
     }
@@ -914,12 +923,17 @@ void EpsilonHeap::entry_collect(GCCause::Cause cause) {
 
     // Move all alive objects to their new locations. All the references are
     // already adjusted at previous step.
+    //
+    // Walk the bitmap and set their moved to whatever.
     EpsilonMoveObjectsObjectClosure cl;
     walk_bitmap(&cl);
     stat_moved = cl.moved();
 
     // Now we moved all objects to their relevant locations, we can retract
     // the "top" of the allocation space to the end of the compacted prefix.
+    //
+    // Now the heap size is _bot - _top?
+    // and when we allocate the next new object in Java code we'll start from _top
     _space->set_top(new_top);
   }
 
@@ -927,6 +941,9 @@ void EpsilonHeap::entry_collect(GCCause::Cause cause) {
     GCTraceTime(Info, gc) time("Step 5: Epilogue", NULL);
 
     // Restore all special mark words.
+    //
+    // In other words, replaces mark words, which we put forwarding address in,
+    // with their special marks that they had before
     preserved_marks.restore();
 
     // Tell the rest of runtime we have finished the GC.
