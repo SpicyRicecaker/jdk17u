@@ -939,6 +939,9 @@ void EpsilonHeap::entry_collect(GCCause::Cause cause) {
 
   {
     GCTraceTime(Info, gc) time("Step 5: Epilogue", NULL);
+    // in which we restore preserved marks
+    // uncommit the bitmap memory
+    //
 
     // Restore all special mark words.
     //
@@ -997,6 +1000,8 @@ void EpsilonHeap::entry_collect(GCCause::Cause cause) {
 
     // Return all memory back if so requested. On large heaps, this would
     // take a while.
+    //
+    // in other words, returns committed space to OS if needed, but it doesn't do much otherwise.
     if (EpsilonUncommit) {
       _virtual_space.shrink_by((_space->end() - new_top) * HeapWordSize);
       _space->set_end((HeapWord*)_virtual_space.high());
