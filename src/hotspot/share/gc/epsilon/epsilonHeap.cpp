@@ -636,16 +636,22 @@ public:
     // If object stays at the same location (which is true for objects in
     // dense prefix, that we would normally get), do not bother recording the
     // move, letting downstream code ignore it.
+    // TL;DR if the object exists at the current compaction point, then we don't even need to record the move
     if (obj != cast_to_oop(_compact_point)) {
-      // change from mark_raw to mark
+      // change: from mark_raw to mark
       markWord mark = obj->mark();
-      // change from mark.must_be_preserved(obj->klass()) to obj->mark_must_be_preserved()
+      // change: from mark.must_be_preserved(obj->klass()) to obj->mark_must_be_preserved()
       // checkout `g1FullGCCompactionPoint.cpp` for more context
+      // we're storing the `forwarding_address` in the mark word of every object
+      // but in java that markword could theoretically be in use.
+      // we use preserved marks, a *stack*, to store the mark word if it is taken up, which we'll pop later to retrieve the forwarding address
       if (obj->mark_must_be_preserved()) {
         _preserved_marks->push(obj, mark);
       }
+      // here we store the forwarding address as the compacting point at the object's mark word
       obj->forward_to(cast_to_oop(_compact_point));
     }
+    // then we increment the compacting point, or bump the pointer up by its size
     _compact_point += obj->size();
   }
 
@@ -831,12 +837,18 @@ void EpsilonHeap::entry_collect(GCCause::Cause cause) {
 
     // Walk all alive objects, compute their new addresses and store those
     // addresses in mark words. Optionally preserve some marks.
+    //
+    // ^^ this means for some certain objects,
+    // their mark word is already taken up, so we store then in `preserved_marks`, a stack which we'll pop later
+    // keep in mind that a stack works, because *order is preserved* in sliding mark-compact
     EpsilonCalcNewLocationObjectClosure cl(_space->bottom(), &preserved_marks);
     walk_bitmap(&cl);
 
     // After addresses are calculated, we know the new top for the allocated
     // space. We cannot set it just yet, because some asserts check that objects
     // are "in heap" based on current "top".
+    // we store this compact point, because after the gc is finished this point is where we'll allocate new objects from
+    // on the heap
     new_top = cl.compact_point();
 
     stat_preserved_marks = preserved_marks.size();
