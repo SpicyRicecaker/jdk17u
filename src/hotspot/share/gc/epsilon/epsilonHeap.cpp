@@ -518,6 +518,7 @@ HeapWord* EpsilonHeap::allocate_or_collect_work(size_t size) {
 
 typedef Stack<oop, mtGC> EpsilonMarkStack;
 
+// This function performs a closure on the reachable roots of a program, usually on the stack.
 void EpsilonHeap::do_roots(OopClosure* cl, bool everything) {
   // Need to tell runtime we are about to walk the roots with 1 thread
   StrongRootsScope scope(1);
@@ -532,6 +533,7 @@ void EpsilonHeap::do_roots(OopClosure* cl, bool everything) {
   // for (OopStorageSet::<Iterator> it = OopStorageSet::strong_iterator(); !it.is_end(); ++it) {
   //   (*it)->oops_do(cl);
   // }
+  //
   // checkout `roots_do` functions for shenandoah. This is the new api for iterating over strong roots
   for (auto id : EnumRange<OopStorageSet::StrongId>()) {
      OopStorageSet::storage(id)->oops_do(cl);
@@ -552,6 +554,7 @@ void EpsilonHeap::do_roots(OopClosure* cl, bool everything) {
   // to surviving Java objects, and either clean the roots, or mark them.
   // Current simple implementation does not handle weak roots specially,
   // and therefore, we mark through them as if they are strong roots.
+  //
   // for (OopStorageSet::Iterator it = OopStorageSet::weak_iterator(); !it.is_end(); ++it) {
   //   (*it)->oops_do(cl);
   // }
@@ -636,7 +639,8 @@ public:
     // If object stays at the same location (which is true for objects in
     // dense prefix, that we would normally get), do not bother recording the
     // move, letting downstream code ignore it.
-    // TL;DR if the object exists at the current compaction point, then we don't even need to record the move
+    //
+    // TL;DR if the object exists at the current compaction point, then we don't even need to move them
     if (obj != cast_to_oop(_compact_point)) {
       // change: from mark_raw to mark
       markWord mark = obj->mark();
@@ -660,9 +664,13 @@ public:
   }
 };
 
+// This closure sets the reference to a pointer to point at
 class EpsilonAdjustPointersOopClosure : public BasicOopIterateClosure {
 private:
   template <class T>
+  // p is the pointer to a child that the parent object holds
+  // it's like `&mut P` in rust, very weird
+  // we know this because this closure is called using `oop_iterate`
   void do_oop_work(T* p) {
     // p is the pointer to memory location where oop is, load the value
     // from it, unpack the compressed reference, if needed:
@@ -672,9 +680,18 @@ private:
 
       // Rewrite the current pointer to the object with its forwardee.
       // Skip the write if update is not needed.
+      //
+      // VV remember when we were calculating new locations of objects,
+      // and some objects had the chance of being right at the compaction point?
+      // if they're already there, then they're fowarded, and we can just ignore them.
       if (obj->is_forwarded()) {
+        // `forwardee` retrieves the forwarding adddress of the object
         oop fwd = obj->forwardee();
+        // another sanity check to make sure that the markbit of marked objects actually
+        // has a fowarding address
         assert(fwd != NULL, "just checking");
+        // a very low level function that sets the value of the pointer to child's old location to the
+        // child's "new" location after move/compaction (which hasn't happened yet)
         RawAccess<>::oop_store(p, fwd);
       }
     }
@@ -685,12 +702,17 @@ public:
   virtual void do_oop(narrowOop* p) { do_oop_work(p); }
 };
 
+// This closure sets all references of an object,
+// or we might even say `children`, to point to the children's forwarding address, as specified
+// in their mark word
 class EpsilonAdjustPointersObjectClosure : public ObjectClosure {
 private:
   EpsilonAdjustPointersOopClosure _cl;
 public:
   void do_object(oop obj) {
     // Apply the updates to all references reachable from current object:
+    //
+    // VV this further proves that `oop_iterate` iterates over all *references* of an object
     obj->oop_iterate(&_cl);
   }
 };
@@ -860,15 +882,30 @@ void EpsilonHeap::entry_collect(GCCause::Cause cause) {
     // Walk all alive objects _and their reference fields_, and put "new
     // addresses" there. We know the new addresses from the forwarding data
     // in mark words. Take care of the heap objects first.
+    //
+    // ^^ we should use
     EpsilonAdjustPointersObjectClosure cl;
     walk_bitmap(&cl);
 
     // Now do the same, but for all VM roots, which reference the objects on
     // their own: their references should also be updated.
+    //
+    // Notice how we're straight up passing `cli` instead of `cl`
+    // this is because we want to modify the references to the roots themselves.
+    // the pointer to roots are stored on stack, but the roots are stored on heap,
+    // which is why we need to update them as well.
+    // this also means that the bitmap above ^^ includes the roots as well, but **iterates
+    // over the object's references, not the objects themselves**
+    //
+    // It makes sense to just update the object's references, because if we have two objects pointing
+    // to the same child, we just want to update their references, and not cause any uncessary recursion
     EpsilonAdjustPointersOopClosure cli;
     process_roots(&cli);
 
     // Finally, make sure preserved marks know the objects are about to move.
+    //
+    // Basically applies `cl` to objects with preserved marks as well
+    // talk about builtin functions
     preserved_marks.adjust_during_full_gc();
   }
 
