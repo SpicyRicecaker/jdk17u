@@ -564,15 +564,25 @@ void EpsilonHeap::do_roots(OopClosure* cl, bool everything) {
 // This is much faster that walking a (very sparse) parsable heap, but it
 // takes up to 1/64-th of heap size for the bitmap.
 void EpsilonHeap::walk_bitmap(ObjectClosure* cl) {
+   // `top` is the highest address of the bitmap
    HeapWord* limit = _space->top();
+   // `bottom` is the lowest address of the bitmap
    HeapWord* addr = _bitmap.get_next_marked_addr(_space->bottom(), limit);
+   //  while we haven't reached the end of bitmap
    while (addr < limit) {
-    //  shenandoah casts the addr to oop, so we'll do that too
+     //  shenandoah casts the addr to oop, so we'll do that too
      oop obj = cast_to_oop(addr);
+     // the objects we get from bitmap should be marked, so we'll assert to make sure
      assert(_bitmap.is_marked(obj), "sanity");
+     // call whatever function we need to on the object itself
      cl->do_object(obj);
+     // add one to the address
+     // we can simply add one because remember bitmap is continous block of memory
+     // ~~also recall that bitmaps are made of bits [0,1,1,0,1, etc.] so we can increment by bit no problem?~~
+     // not true, we're storing full on addresses in the bitwords
      addr += 1;
      if (addr < limit) {
+       // increment address until we get to the next markedbit
        addr = _bitmap.get_next_marked_addr(addr, limit);
      }
    }
