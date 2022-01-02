@@ -24,15 +24,15 @@
 package gc.epsilon;
 
 /**
- * @test TestSlidingGC
+ * @test TestMarkCompactGC
  * @key randomness
  * @requires vm.gc.Epsilon & !vm.graal.enabled
- * @summary Epsilon sliding GC works
+ * @summary Epsilon MarkCompact GC works
  * @library /test/lib
- * @run main/othervm -Xmx512m -XX:+UnlockExperimentalVMOptions -XX:+UseEpsilonGC -XX:+EpsilonSlidingGC -XX:+EpsilonVerify                      gc.epsilon.TestSlidingGC
- * @run main/othervm -Xmx512m -XX:+UnlockExperimentalVMOptions -XX:+UseEpsilonGC -XX:+EpsilonSlidingGC                                         gc.epsilon.TestSlidingGC
- * @run main/othervm -Xmx512m -XX:+UnlockExperimentalVMOptions -XX:+UseEpsilonGC -XX:+EpsilonSlidingGC -XX:+EpsilonVerify -XX:+EpsilonUncommit gc.epsilon.TestSlidingGC
- * @run main/othervm -Xmx512m -XX:+UnlockExperimentalVMOptions -XX:+UseEpsilonGC -XX:+EpsilonSlidingGC                    -XX:+EpsilonUncommit gc.epsilon.TestSlidingGC
+ * @run main/othervm -Xmx512m -XX:+UnlockExperimentalVMOptions -XX:+UseEpsilonGC -XX:+EpsilonMarkCompactGC -XX:+EpsilonVerify                      gc.epsilon.TestMarkCompactGC
+ * @run main/othervm -Xmx512m -XX:+UnlockExperimentalVMOptions -XX:+UseEpsilonGC -XX:+EpsilonMarkCompactGC                                         gc.epsilon.TestMarkCompactGC
+ * @run main/othervm -Xmx512m -XX:+UnlockExperimentalVMOptions -XX:+UseEpsilonGC -XX:+EpsilonMarkCompactGC -XX:+EpsilonVerify -XX:+EpsilonUncommit gc.epsilon.TestMarkCompactGC
+ * @run main/othervm -Xmx512m -XX:+UnlockExperimentalVMOptions -XX:+UseEpsilonGC -XX:+EpsilonMarkCompactGC                    -XX:+EpsilonUncommit gc.epsilon.TestMarkCompactGC
  */
 
 import java.util.concurrent.*;
@@ -42,7 +42,7 @@ import jdk.test.lib.process.OutputAnalyzer;
 import jdk.test.lib.process.ProcessTools;
 import jdk.test.lib.Utils;
 
-public class TestSlidingGC {
+public class TestMarkCompactGC {
     // 10 million
     // .24 GB allocation?
     static int SIZE = Integer.getInteger("size", 10_000_000);
@@ -52,6 +52,7 @@ public class TestSlidingGC {
     static Object[] sink;
 
     public static void main(String... args) {
+        System.out.println("ok it's modified");
         // random thread
         Random r = Utils.getRandomInstance();
         // object array of 10 million
